@@ -45,13 +45,12 @@ http://172.16.0.1/#/commissioning/communication/modbus-tcp
 (See the QR-code on your SolarEdge inverter to read the password to
 connect to the network without the app.)
 """
+import asyncio
 import struct
 import sys
 from collections import OrderedDict
 from decimal import Decimal
 from enum import Enum
-
-from pymodbus.client.sync import ModbusTcpClient
 
 
 class Regs:
@@ -220,14 +219,107 @@ class SunspecRegs(RegsImpl):
         return ret
 
 
-class SunspecModbusTcpClient(ModbusTcpClient):
-    def get_from_mapping(self, mapping, unit=1):
+class ModbusFrame:
+    """
+    Modbus request/response packet
+
+    Example transcript:
+
+      >> 0001 0000 0006 0103 9c40 0045
+      - transaction 1, protocol 0, 6 bytes, unit 1, function 3
+      - from offset 0x9c40 get 0x45 registers
+      << 0001 0000 008d 0103 8a 5375 6e53 0001 ...
+      - transaction 1, protocol 0, 0x8d bytes, unit 1, function 3
+      - get 0x8a bytes of data
+      - all registers as uint16
+    """
+    @classmethod
+    def read_multiple_registers(cls, transid, unitid, offset, count):
+        return ModbusFrame(
+            transid, unitid, 0x3, bytes([
+                offset >> 8, offset & 0xff, count >> 8, count & 0xff]))
+
+    @classmethod
+    def unpack(cls, bytes_):
+        assert len(bytes_) >= 8, bytes_
+        transid = (bytes_[0] << 8 | bytes_[0])
+        assert bytes_[2] == bytes_[3] == 0, bytes_
+        datalen = (bytes_[4] << 8 | bytes_[5])
+        assert datalen >= 2, bytes_
+        assert len(bytes_) >= (datalen + 6), bytes_
+        unitid = bytes_[6]
+        funccode = bytes_[7]
+        data = bytes_[8:]
+        return ModbusFrame(transid, unitid, funccode, data)
+
+    def __init__(self, transid, unitid, funccode, data):
+        assert 0 <= transid <= 65535, transid
+        self.transid = transid
+        self.unitid = unitid
+        # 3 = Read Multiple Holding Registers
+        # https://en.wikipedia.org/wiki/Modbus#
+        #   Available_function/command_codes
+        self.funccode = funccode
+        self.data = data
+
+    def data_as_registers(self):
+        assert self.data and len(self.data) >= (self.data[0] + 1), self.data
+        return [(h << 8 | l) for h, l in zip(
+            self.data[1::2], self.data[2::2])]
+
+    def pack(self):
+        # https://en.wikipedia.org/wiki/Modbus#
+        #   Modbus_TCP_frame_format_(primarily_used_on_Ethernet_networks)
+        datalen = (1 + 1 + len(self.data))  # unit+funccode+data
+        return bytes([
+            self.transid >> 8,      # 0: transaction id - copied by server
+            self.transid & 0xff,    # 1: transaction id - copied by server
+            0,                      # 2: protocol id - 0
+            0,                      # 3: protocol id - 0
+            datalen >> 8,           # 4: data length
+            datalen & 0xff,         # 5: data length
+            self.unitid,            # 6: unit identifier ('slave address')
+            self.funccode,          # 7: MODBUS function code
+        ]) + self.data
+
+
+class SunspecModbusTcpAsyncio:
+    def __init__(self, reader, writer):
+        self.reader, self.writer = reader, writer
+        self.transid = 0
+
+    async def get_from_mapping(self, mapping, unit=1):
         first_reg = mapping[0][0]
         eof_reg = mapping[-1][0]
         count = eof_reg - first_reg
-        regs = self.read_holding_registers(first_reg, count=count, unit=unit)
-        sunspecregs = SunspecRegs(first_reg, regs.registers)
+
+        self.transid += 1
+        request = ModbusFrame.read_multiple_registers(
+            self.transid, unit, first_reg, count)
+        self.writer.write(request.pack())
+
+        bytes_ = await self.reader.read(4096)
+        response = ModbusFrame.unpack(bytes_)
+        registers = response.data_as_registers()
+
+        sunspecregs = SunspecRegs(first_reg, registers)
         return sunspecregs.mapping2dict(mapping)
+
+
+async def main(host, port):
+    reader, writer = await asyncio.open_connection(host, port)
+    c = SunspecModbusTcpAsyncio(reader, writer)
+
+    d = await c.get_from_mapping(SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS)
+    assert d['C_SunSpec_ID'] == 0x53756e53, 'C_SunSpec_ID != "SunS"'
+    for key, value in d.items():
+        print('{:16}  {}'.format(key, value))
+    print()
+
+    d2 = await c.get_from_mapping(SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS)
+    for key, value in d2.items():
+        print('{:16}  {}'.format(key, value))
+    print()
 
 
 if __name__ == '__main__':
@@ -237,15 +329,4 @@ if __name__ == '__main__':
 
     # Output
     host, port = sys.argv[1:]  # port defaults to 1502
-    c = SunspecModbusTcpClient(host=host, port=port, timeout=15)
-
-    d = c.get_from_mapping(SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS)
-    assert d['C_SunSpec_ID'] == 0x53756e53, 'C_SunSpec_ID != "SunS"'
-    for key, value in d.items():
-        print('{:16}  {}'.format(key, value))
-    print()
-
-    d2 = c.get_from_mapping(SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS)
-    for key, value in d2.items():
-        print('{:16}  {}'.format(key, value))
-    print()
+    asyncio.run(main(host, port))
