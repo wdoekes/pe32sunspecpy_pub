@@ -53,13 +53,32 @@ from decimal import Decimal
 from enum import Enum
 
 
+class DecimalWithUnit(Decimal):
+    @classmethod
+    def with_unit(cls, value, unit):
+        ret = cls(value)
+        ret.unit = unit
+        return ret
+
+    def __str__(self, format_spec=''):
+        return '{} {}'.format(super().__str__(), self.unit)
+    __format__ = __str__
+
+
 class Regs:
     I16 = ('h', 1)  # signed int16
     U16 = ('H', 1)  # unsigned int16
     I32 = ('i', 2)  # signed int32
     U32 = ('I', 2)  # unsigned int32
-    BSTR = 'bstr'   # binary string (trailing spaces and NULs)
-    STR = 'str'     # string
+
+    class BSTR:
+        "Binary string (trailing spaces and NULs)"
+        def __init__(self, len):
+            self.len = len
+
+    class STR(BSTR):
+        "String (stripped of trailing blanks)"
+        pass
 
 
 class SunspecInverterStatus(Enum):
@@ -80,10 +99,10 @@ SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS = (
     (40000, 'C_SunSpec_ID', Regs.U32),          # 0x53756e53 "SunS"
     (40002, 'C_SunSpec_DID', Regs.U16),         # 1
     (40003, 'C_SunSpec_Length', Regs.U16),      # 65 + 40003 + 1 == 40069
-    (40004, 'C_Manufacturer', Regs.STR, 32),    # "SolarEdge"
-    (40020, 'C_Model', Regs.STR, 32),           # "SE5000H-RW000BNN4"
-    (40044, 'C_Version', Regs.STR, 16),         # "0004.0011.0030"
-    (40052, 'C_SerialNumber', Regs.STR, 16),    # "12345678"
+    (40004, 'C_Manufacturer', Regs.STR(32)),    # "SolarEdge"
+    (40020, 'C_Model', Regs.STR(32)),           # "SE5000H-RW000BNN4"
+    (40044, 'C_Version', Regs.STR(16)),         # "0004.0011.0030"
+    (40052, 'C_SerialNumber', Regs.STR(16)),    # "12345678"
     (40068, 'C_DeviceAddress', Regs.U16),       # 1
     (40069,),                                   # EOF
 )
@@ -95,15 +114,15 @@ SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS = (
     # 40069: [101] = single phase, 102 = split phase, 103 = threephase
     (40069, 'C_SunSpec_DID', Regs.U16),         # 101 (= single phase)
     (40070, 'C_SunSpec_Length', Regs.U16),      # 50 + 40070 + 1 == 40121
-    (40083, 'I_AC_Power', Regs.U16),            # AC Power value [Watt]
+    (40083, 'I_AC_Power', Regs.U16, 'W'),       # AC Power value [Watt]
     (40084, 'I_AC_Power_SF', Regs.I16),         # AC Power scale (exp)
-    (40085, 'I_AC_Frequency', Regs.U16),        # AC Frequency value [Hertz]
+    (40085, 'I_AC_Frequency', Regs.U16, 'Hz'),  # AC Frequency value [Hertz]
     (40086, 'I_AC_Frequency_SF', Regs.I16),     # AC Frequency scale (exp)
-    (40093, 'I_AC_Energy_WH', Regs.U32),        # AC Lifetime Energy prod [WH]
+    (40093, 'I_AC_Energy_WH', Regs.U32, 'Wh'),  # AC Lifetime Energy prod [WH]
     (40095, 'I_AC_Energy_WH_SF', Regs.I16),     # AC Lifetime Energe sc. (exp)
-    (40100, 'I_DC_Power', Regs.U16),            # DC Power value [Watt]
+    (40100, 'I_DC_Power', Regs.U16, 'W'),       # DC Power value [Watt]
     (40101, 'I_DC_Power_SF', Regs.I16),         # DC Power scale (exp)
-    (40103, 'I_Temp_Sink', Regs.I16),           # Heat Sink temp [C]
+    (40103, 'I_Temp_Sink', Regs.I16, '°C'),     # Heat Sink temp [C]
     (40106, 'I_Temp_Sink_SF', Regs.I16),        # Heat Sink scale (exp)
     (40107, 'I_Status', SunspecInverterStatus),  # Operating State
     (40108, 'I_Status_Vendor', Regs.U16),       # Vendor-defined state
@@ -140,7 +159,7 @@ class RegsImpl(Regs):
         self._off = offset
         self._u16values = u16values
 
-    def get(self, offset, type_, *args):
+    def get(self, offset, type_):
         """
         Converts the registers to the specified type
 
@@ -153,24 +172,19 @@ class RegsImpl(Regs):
                 'H', self._u16values, offset - self._off, 1)
             return type_(uint16)
         elif isinstance(type_, tuple):
-            assert not args
             inttype, intsize = type_
             return self.ushorts2type(
                 inttype, self._u16values, offset - self._off, intsize)
-        elif type_ == 'bstr':
-            assert len(args) == 1, args
-            length = args[0]
-            assert length % 2 == 0, length
-            return self.ushorts2bin(
-                self._u16values, offset - self._off, length // 2)
-        elif type_ == 'str':
-            assert len(args) == 1, args
-            length = args[0]
+        elif isinstance(type_, Regs.STR):
             return (
-                self.get(offset, 'bstr', length)
+                self.get(offset, Regs.BSTR(type_.len))
                 .rstrip(b'\x00\x20').decode('utf-8'))
+        elif isinstance(type_, Regs.BSTR):
+            assert type_.len % 2 == 0, type_.len
+            return self.ushorts2bin(
+                self._u16values, offset - self._off, type_.len // 2)
         else:
-            raise NotImplementedError((offset, type_, args))
+            raise NotImplementedError((offset, type_))
 
     def mapping2dict(self, mapping):
         """
@@ -180,6 +194,10 @@ class RegsImpl(Regs):
 
             MAPPING = [
                 (40000, 'C_SunSpec_ID', Regs.U32),
+                ...
+                (40004, 'C_Manufacturer', Regs.STR(32)),
+                ...
+                (40069,),
             ]
             r.mapping2dict(MAPPING)
             # ^- returns a dict with key 'C_SunSpec_ID' and the unsigned
@@ -188,8 +206,16 @@ class RegsImpl(Regs):
         ret = OrderedDict()
         assert mapping and len(mapping[-1]) == 1, 'expected END marker'
         for item in mapping[0:-1]:  # don't fetch END marker
-            offset, name, type_and_args = item[0], item[1], item[2:]
-            ret[name] = self.get(offset, *type_and_args)
+            offset, name, type_, args = item[0], item[1], item[2], item[3:]
+            value = self.get(offset, type_)
+
+            if args:
+                assert len(args) == 1, item
+                assert isinstance(value, (Decimal, int)), (type(value), value)
+                value = DecimalWithUnit.with_unit(value, args[0])
+
+            ret[name] = value
+
         return ret
 
 
@@ -214,7 +240,12 @@ class SunspecRegs(RegsImpl):
             key = sf_key[0:-3]
             assert key in ret, (key, ret)
             exp = Decimal(10) ** ret[sf_key]  # *10^x (E-1, E01, ...)
-            ret[key] = Decimal(ret[key]) * exp
+            if isinstance(ret[key], DecimalWithUnit):
+                value = DecimalWithUnit.with_unit(
+                    ret[key] * exp, ret[key].unit)
+            else:
+                value = Decimal(ret[key]) * exp
+            ret[key] = value
             del ret[sf_key]
         return ret
 
