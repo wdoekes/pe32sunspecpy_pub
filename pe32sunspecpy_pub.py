@@ -65,20 +65,49 @@ class DecimalWithUnit(Decimal):
     __format__ = __str__
 
 
-class Regs:
-    I16 = ('h', 1)  # signed int16
-    U16 = ('H', 1)  # unsigned int16
-    I32 = ('i', 2)  # signed int32
-    U32 = ('I', 2)  # unsigned int32
+class RType:
+    """
+    Various register data conversions, operating on a callable that
+    takes an offset and an octet count.
+    """
+    class CAST:
+        "Cast U16 to the specified type"
+        def __init__(self, type_):
+            self._type = type_
+
+        def __call__(self, getter, offset=0):
+            return self._type(struct.unpack('>H', getter(offset, 2))[0])
 
     class BSTR:
         "Binary string (trailing spaces and NULs)"
         def __init__(self, len):
             self.len = len
 
+        def __call__(self, getter, offset=0):
+            return getter(offset, self.len)
+
     class STR(BSTR):
         "String (stripped of trailing blanks)"
-        pass
+        def __call__(self, getter, offset=0):
+            return (
+                super().__call__(getter, offset).rstrip(b'\x00\x20')
+                .decode('utf-8'))
+
+    @staticmethod
+    def I16(getter, offset=0):
+        return struct.unpack('>h', getter(offset, 2))[0]
+
+    @staticmethod
+    def U16(getter, offset=0):
+        return struct.unpack('>H', getter(offset, 2))[0]
+
+    @staticmethod
+    def I32(getter, offset=0):
+        return struct.unpack('>i', getter(offset, 4))[0]
+
+    @staticmethod
+    def U32(getter, offset=0):
+        return struct.unpack('>I', getter(offset, 4))[0]
 
 
 class SunspecInverterStatus(Enum):
@@ -96,14 +125,14 @@ class SunspecInverterStatus(Enum):
 # https://www.solaredge.com/sites/default/files/
 #   sunspec-implementation-technical-note.pdf
 SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS = (
-    (40000, 'C_SunSpec_ID', Regs.U32),          # 0x53756e53 "SunS"
-    (40002, 'C_SunSpec_DID', Regs.U16),         # 1
-    (40003, 'C_SunSpec_Length', Regs.U16),      # 65 + 40003 + 1 == 40069
-    (40004, 'C_Manufacturer', Regs.STR(32)),    # "SolarEdge"
-    (40020, 'C_Model', Regs.STR(32)),           # "SE5000H-RW000BNN4"
-    (40044, 'C_Version', Regs.STR(16)),         # "0004.0011.0030"
-    (40052, 'C_SerialNumber', Regs.STR(16)),    # "12345678"
-    (40068, 'C_DeviceAddress', Regs.U16),       # 1
+    (40000, 'C_SunSpec_ID', RType.U32),         # 0x53756e53 "SunS"
+    (40002, 'C_SunSpec_DID', RType.U16),        # 1
+    (40003, 'C_SunSpec_Length', RType.U16),     # 65 + 40003 + 1 == 40069
+    (40004, 'C_Manufacturer', RType.STR(32)),   # "SolarEdge"
+    (40020, 'C_Model', RType.STR(32)),          # "SE5000H-RW000BNN4"
+    (40044, 'C_Version', RType.STR(16)),        # "0004.0011.0030"
+    (40052, 'C_SerialNumber', RType.STR(16)),   # "12345678"
+    (40068, 'C_DeviceAddress', RType.U16),      # 1
     (40069,),                                   # EOF
 )
 
@@ -112,79 +141,98 @@ SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS = (
 #   sunspec-implementation-technical-note.pdf
 SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS = (
     # 40069: [101] = single phase, 102 = split phase, 103 = threephase
-    (40069, 'C_SunSpec_DID', Regs.U16),         # 101 (= single phase)
-    (40070, 'C_SunSpec_Length', Regs.U16),      # 50 + 40070 + 1 == 40121
-    (40083, 'I_AC_Power', Regs.U16, 'W'),       # AC Power value [Watt]
-    (40084, 'I_AC_Power_SF', Regs.I16),         # AC Power scale (exp)
-    (40085, 'I_AC_Frequency', Regs.U16, 'Hz'),  # AC Frequency value [Hertz]
-    (40086, 'I_AC_Frequency_SF', Regs.I16),     # AC Frequency scale (exp)
-    (40093, 'I_AC_Energy_WH', Regs.U32, 'Wh'),  # AC Lifetime Energy prod [WH]
-    (40095, 'I_AC_Energy_WH_SF', Regs.I16),     # AC Lifetime Energe sc. (exp)
-    (40100, 'I_DC_Power', Regs.U16, 'W'),       # DC Power value [Watt]
-    (40101, 'I_DC_Power_SF', Regs.I16),         # DC Power scale (exp)
-    (40103, 'I_Temp_Sink', Regs.I16, '°C'),     # Heat Sink temp [C]
-    (40106, 'I_Temp_Sink_SF', Regs.I16),        # Heat Sink scale (exp)
-    (40107, 'I_Status', SunspecInverterStatus),  # Operating State
-    (40108, 'I_Status_Vendor', Regs.U16),       # Vendor-defined state
+    (40069, 'C_SunSpec_DID', RType.U16),        # 101 (= single phase)
+    (40070, 'C_SunSpec_Length', RType.U16),     # 50 + 40070 + 1 == 40121
+    (40083, 'I_AC_Power', RType.U16, 'W'),      # AC Power value [Watt]
+    (40084, 'I_AC_Power_SF', RType.I16),        # AC Power scale (exp)
+    (40085, 'I_AC_Frequency', RType.U16, 'Hz'),  # AC Frequency value [Hertz]
+    (40086, 'I_AC_Frequency_SF', RType.I16),    # AC Frequency scale (exp)
+    (40093, 'I_AC_Energy_WH', RType.U32, 'Wh'),  # AC Lifetime Energy prod [WH]
+    (40095, 'I_AC_Energy_WH_SF', RType.I16),    # AC Lifetime Energe sc. (exp)
+    (40100, 'I_DC_Power', RType.U16, 'W'),      # DC Power value [Watt]
+    (40101, 'I_DC_Power_SF', RType.I16),        # DC Power scale (exp)
+    (40103, 'I_Temp_Sink', RType.I16, '°C'),    # Heat Sink temp [C]
+    (40106, 'I_Temp_Sink_SF', RType.I16),       # Heat Sink scale (exp)
+    (40107, 'I_Status', RType.CAST(SunspecInverterStatus)),  # Oper. State
+    (40108, 'I_Status_Vendor', RType.U16),      # Vendor-defined state
     (40121,),                                   # EOF
 )
 
 
-class RegsImpl(Regs):
+class Registers:
     """
-    Implementation converting registers (list of 16bit integers) with an
-    offset to other types.
+    One or more register values, initialized with binary data
 
-    Allowed types are defined in the Regs superclass.
+    Because half the time we don't want 16-bit integers, we'll use this
+    to hold the raw octets and return values from there instead.
+
+    Use [0:2] style slices to get the canonical unsigned 16-bits shorts.
+
+    Use packed() to access the raw data, using 16-bit offsets and
+    (8-bit) octet counts. For example:
+
+        # Get 32-bits integer (4 bytes) from the 1st (0-based) and 2nd
+        # 16-bit registers.
+        struct.unpack('>I', registers.packed(1, 4))
+    """
+    def __init__(self, register_octets):
+        self._packed = register_octets
+
+    def packed(self, offset, octets):
+        start, stop = offset * 2, offset * 2 + octets
+        return self._packed[start:stop]
+
+    def __getitem__(self, slice_):
+        if isinstance(slice_, int):
+            start, stop = slice_, slice_ + 1
+            return self._get_u16_list(start, stop)[0]
+
+        if slice_.step is not None:
+            raise NotImplementedError
+
+        start, stop = slice_.start, slice_.stop
+        if start is None:
+            start = 0
+        if stop is None:
+            stop = len(self._packed) // 2
+
+        if start < 0 or stop < 0:
+            raise NotImplementedError
+
+        return self._get_u16_list(start, stop)
+
+    def _get_u16_list(self, start, stop):
+        len_ = stop - start
+        values = struct.unpack(
+            '>{}'.format('H' * len_), self._packed[(start * 2):(stop * 2)])
+        return values
+
+
+class RegisterIface:
+    """
+    Wrapper around Registers, giving it an offset and type conversion
 
     Example usage::
 
-        r = RegsImpl(40000, [0x1234, 0x5678])
-        r.get(40000, Regs.U32) == 0x12345678
+        rs = Registers(b'\\x12\\x34\\x56\\x78')
+        rs.packed(0, 2) == b'\\x12\\x34'
+
+        rif = RegisterIface(40000, rs)
+        rif.get(40000, RType.U32) == 0x12345678
     """
-    @staticmethod
-    def ushorts2bin(registers, off, size):
-        return struct.pack(
-            '>{}'.format('H' * size), *registers[off:off + size])
-
-    @classmethod
-    def ushorts2type(cls, type_, registers, off, size):
-        return struct.unpack(
-            '>{}'.format(type_), cls.ushorts2bin(registers, off, size))[0]
-
-    def __init__(self, offset, u16values):
-        """
-        Create RegsImpl storing the offset so get() can use absolute offsets
-        """
+    def __init__(self, offset, registers):
         self._off = offset
-        self._u16values = u16values
+        self._registers = registers
 
     def get(self, offset, type_):
         """
-        Converts the registers to the specified type
+        Get datatype type_ from registers at absolute offset
 
-        type_ must be a predefined type known to this class or a
-        subclass of Enum. Some types, like strings, take an additional
-        (length) argument.
+        type_ must be a callable that takes a callable and an offset.
+
+        See: RType class.
         """
-        if isinstance(type_, type) and issubclass(type_, Enum):
-            uint16 = self.ushorts2type(
-                'H', self._u16values, offset - self._off, 1)
-            return type_(uint16)
-        elif isinstance(type_, tuple):
-            inttype, intsize = type_
-            return self.ushorts2type(
-                inttype, self._u16values, offset - self._off, intsize)
-        elif isinstance(type_, Regs.STR):
-            return (
-                self.get(offset, Regs.BSTR(type_.len))
-                .rstrip(b'\x00\x20').decode('utf-8'))
-        elif isinstance(type_, Regs.BSTR):
-            assert type_.len % 2 == 0, type_.len
-            return self.ushorts2bin(
-                self._u16values, offset - self._off, type_.len // 2)
-        else:
-            raise NotImplementedError((offset, type_))
+        return type_(self._registers.packed, offset - self._off)
 
     def mapping2dict(self, mapping):
         """
@@ -193,9 +241,9 @@ class RegsImpl(Regs):
         Example usage::
 
             MAPPING = [
-                (40000, 'C_SunSpec_ID', Regs.U32),
+                (40000, 'C_SunSpec_ID', RType.U32),
                 ...
-                (40004, 'C_Manufacturer', Regs.STR(32)),
+                (40004, 'C_Manufacturer', RType.STR(32)),
                 ...
                 (40069,),
             ]
@@ -219,10 +267,10 @@ class RegsImpl(Regs):
         return ret
 
 
-class SunspecRegs(RegsImpl):
+class SunspecRegs(RegisterIface):
     def mapping2dict(self, mapping):
         """
-        Extend RegsImpl to automatically handle "_SF" (scale factor) keys
+        Extend RegisterIface to automatically handle "_SF" (scale factor) keys
 
         All keys ending with "_SF" are applied and removed from the dictionary.
 
@@ -294,9 +342,22 @@ class ModbusFrame:
         self.data = data
 
     def data_as_registers(self):
-        assert self.data and len(self.data) >= (self.data[0] + 1), self.data
-        return [(h << 8 | l) for h, l in zip(
-            self.data[1::2], self.data[2::2])]
+        """
+        Decode the data octets as big endian 16-bit unsigned ints (registers).
+
+        Feels a bit superfluous perhaps, as we may treat these as other
+        data types later on, but let's stick to the protocol.
+        """
+        assert self.data, self.data
+        assert (self.data[0] % 2) == 0, self.data
+        hlen = self.data[0] >> 1
+        assert len(self.data) >= (hlen + 1), self.data
+        # manual = tuple((h << 8 | l) for h, l in zip(
+        #     self.data[1::2], self.data[2::2]))
+        # faster = struct.unpack('>{}'.format('H' * hlen), self.data[1:])
+        lazy = Registers(self.data[1:(1 + hlen * 2)])
+        # immediate = lazy[:]
+        return lazy
 
     def pack(self):
         # https://en.wikipedia.org/wiki/Modbus#
@@ -355,8 +416,14 @@ async def main(host, port):
 
 if __name__ == '__main__':
     # Test
-    r = RegsImpl(40000, [0x1234, 0x5678])
-    assert r.get(40000, Regs.U32) == 0x12345678
+    rs = Registers(b'\x41\x61\x70\x00')
+    assert rs[0] == 0x4161, rs[0]
+    assert rs[1] == 0x7000, rs[1]
+    assert rs[:] == (0x4161, 0x7000), rs[:]
+    rif = RegisterIface(40000, rs)
+    assert rif.get(40000, RType.U32) == 0x41617000, rif.get(40000, RType.U32)
+    assert rif.get(40001, RType.U16) == 0x7000, rif.get(40001, RType.U16)
+    assert rif.get(40000, RType.STR(4)) == 'Aap', rif.get(40000, RType.STR(4))
 
     # Output
     host, port = sys.argv[1:]  # port defaults to 1502
