@@ -1,0 +1,22 @@
+[Unit]
+Description=PE32 Sunspec exporter
+After=network.target
+
+[Service]
+Type=simple
+#Environment=PE32SUNSPEC_BROKER=test.mosquitto.org
+#Environment=PE32SUNSPEC_TOPIC=myhome/infra/solar/xwwwform
+#Environment=PE32SUNSPEC_GUID=EUI48:11:22:33:44:55:66
+#Environment=PE32SUNSPEC_DEBUG=1
+Environment=HOST=192.168.1.234
+Environment=PORT=1502
+EnvironmentFile=-/etc/default/pe32sunspecpy_pub
+RestartSec=15
+Restart=always
+ExecStart=/usr/bin/python3 /srv/pe32sunspecpy_pub/pe32sunspecpy_pub.py --publish $HOST $PORT
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+# vim: set syn=dosini:

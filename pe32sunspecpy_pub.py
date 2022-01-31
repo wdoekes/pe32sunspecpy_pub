@@ -46,11 +46,17 @@ http://172.16.0.1/#/commissioning/communication/modbus-tcp
 connect to the network without the app.)
 """
 import asyncio
+import os
 import struct
 import sys
+import time
 from collections import OrderedDict
 from decimal import Decimal
 from enum import Enum
+
+from asyncio_mqtt import Client as MqttClient
+
+__version__ = 'pe32sunspecpy_pub-FIXME'
 
 
 class DecimalWithUnit(Decimal):
@@ -405,7 +411,67 @@ class SunspecModbusTcpAsyncio:
         return sunspecregs.mapping2dict(mapping)
 
 
-async def main(host, port):
+class Pe32SunspecPublisher:
+    def __init__(self):
+        self._mqtt_broker = os.environ.get(
+            'PE32SUNSPEC_BROKER', 'test.mosquitto.org')
+        self._mqtt_topic = os.environ.get(
+            'PE32SUNSPEC_TOPIC', 'myhome/infra/solar/xwwwform')
+        self._mqttc = None
+        self._guid = os.environ.get(
+            'PE32SUNSPEC_GUID', 'EUI48:11:22:33:44:55:66')
+
+    def open(self):
+        # Unfortunately this does use a thread for keepalives. Oh well.
+        # As long as it's implemented correctly, I guess we can live
+        # with it.
+        self._mqttc = MqttClient(self._mqtt_broker)
+        return self._mqttc
+
+    async def publish(self, kv):
+        #log.debug(f'publish: {kv}')
+        print(f'publish: {kv}')
+
+        tm = int(time.time())
+        mqtt_string = (
+            f'device_id={self._guid}&'
+            f's_act_energy_wh={int(kv["I_AC_Energy_WH"])}&'
+            f's_inst_power_w={int(kv["I_AC_Power"])}&'
+            f's_temperature={float(kv["I_Temp_Sink"])}&'
+            f's_status={kv["I_Status"]}:{kv["I_Status_Vendor"]}&'
+            f'dbg_uptime={tm}&'
+            f'dbg_version={__version__}').encode('ascii')
+
+        await self._mqttc.publish(self._mqtt_topic, payload=mqtt_string)
+
+        print(f'Published: {mqtt_string}')
+
+
+async def mainloop(host, port):
+
+    publisher = Pe32SunspecPublisher()
+    async with publisher.open():
+        while True:
+            reader, writer = await asyncio.open_connection(host, port)
+            c = SunspecModbusTcpAsyncio(reader, writer)
+
+            # d = await c.get_from_mapping(SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS)
+            # assert d['C_SunSpec_ID'] == 0x53756e53, 'C_SunSpec_ID != "SunS"'
+            # for key, value in d.items():
+            #     print('{:16}  {}'.format(key, value))
+            # print()
+
+            d2 = await c.get_from_mapping(SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS)
+            writer.close()
+            for key, value in d2.items():
+                print('{:16}  {}'.format(key, value))
+            print()
+
+            await publisher.publish(d2)
+            await asyncio.sleep(60)
+
+
+async def oneshot(host, port):
     reader, writer = await asyncio.open_connection(host, port)
     c = SunspecModbusTcpAsyncio(reader, writer)
 
@@ -433,5 +499,10 @@ if __name__ == '__main__':
     assert rif.get(40000, RType.STR(4)) == 'Aap', rif.get(40000, RType.STR(4))
 
     # Output
-    host, port = sys.argv[1:]  # port defaults to 1502
-    asyncio.run(main(host, port))
+    if sys.argv[1:2] == ['--publish']:
+        sys.stdout.reconfigure(line_buffering=True)  # PYTHONUNBUFFERED
+        host, port = sys.argv[2:]  # port defaults to 1502
+        asyncio.run(mainloop(host, port))
+    else:
+        host, port = sys.argv[1:]  # port defaults to 1502
+        asyncio.run(oneshot(host, port))
