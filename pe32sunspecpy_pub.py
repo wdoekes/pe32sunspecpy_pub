@@ -429,7 +429,6 @@ class Pe32SunspecPublisher:
         return self._mqttc
 
     async def publish(self, kv):
-        #log.debug(f'publish: {kv}')
         print(f'publish: {kv}')
 
         tm = int(time.time())
@@ -448,20 +447,21 @@ class Pe32SunspecPublisher:
 
 
 async def mainloop(host, port):
-
     publisher = Pe32SunspecPublisher()
     async with publisher.open():
         while True:
             reader, writer = await asyncio.open_connection(host, port)
             c = SunspecModbusTcpAsyncio(reader, writer)
 
-            # d = await c.get_from_mapping(SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS)
+            # d = await c.get_from_mapping(
+            #     SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS)
             # assert d['C_SunSpec_ID'] == 0x53756e53, 'C_SunSpec_ID != "SunS"'
             # for key, value in d.items():
             #     print('{:16}  {}'.format(key, value))
             # print()
 
-            d2 = await c.get_from_mapping(SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS)
+            d2 = await c.get_from_mapping(
+                SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS)
             writer.close()
             for key, value in d2.items():
                 print('{:16}  {}'.format(key, value))
