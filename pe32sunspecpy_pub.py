@@ -164,11 +164,18 @@ SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS = (
     (40121,),                                   # EOF
 )
 
+# SolarEdge SE5000H example to fetch only I_AC_Power_WH
+SUNSPEC_INVERTER_MODEL_ONLY_AC_ENERGY_WH = (
+    (40093, 'I_AC_Energy_WH', RType.U32, 'Wh'),  # AC Lifetime Energy prod [WH]
+    (40095, 'I_AC_Energy_WH_SF', RType.I16),    # AC Lifetime Energe sc. (exp)
+    (40097,),
+)
+
 # SolarEdge SE5000H example to fetch only I_AC_Power
 SUNSPEC_INVERTER_MODEL_ONLY_AC_POWER = (
     (40083, 'I_AC_Power', RType.U16, 'W'),      # AC Power value [Watt]
     (40084, 'I_AC_Power_SF', RType.I16),        # AC Power scale (exp)
-    (40085,)
+    (40085,),
 )
 
 
