@@ -432,8 +432,13 @@ class Pe32SunspecPublisher:
         print(f'publish: {kv}')
 
         tm = int(time.time())
+        s_identifier = (
+            f'{kv["C_Manufacturer"]}/{kv["C_Model"]}/{kv["C_Version"]}/'
+            f'{kv["C_SerialNumber"]}')
+
         mqtt_string = (
             f'device_id={self._guid}&'
+            f's_identifier={s_identifier}&'
             f's_act_energy_wh={int(kv["I_AC_Energy_WH"])}&'
             f's_inst_power_w={int(kv["I_AC_Power"])}&'
             f's_temperature={float(kv["I_Temp_Sink"])}&'
@@ -446,45 +451,41 @@ class Pe32SunspecPublisher:
         print(f'Published: {mqtt_string}')
 
 
-async def mainloop(host, port):
-    publisher = Pe32SunspecPublisher()
-    async with publisher.open():
-        while True:
-            reader, writer = await asyncio.open_connection(host, port)
-            c = SunspecModbusTcpAsyncio(reader, writer)
-
-            # d = await c.get_from_mapping(
-            #     SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS)
-            # assert d['C_SunSpec_ID'] == 0x53756e53, 'C_SunSpec_ID != "SunS"'
-            # for key, value in d.items():
-            #     print('{:16}  {}'.format(key, value))
-            # print()
-
-            d2 = await c.get_from_mapping(
-                SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS)
-            writer.close()
-            for key, value in d2.items():
-                print('{:16}  {}'.format(key, value))
-            print()
-
-            await publisher.publish(d2)
-            await asyncio.sleep(60)
-
-
 async def oneshot(host, port):
     reader, writer = await asyncio.open_connection(host, port)
     c = SunspecModbusTcpAsyncio(reader, writer)
 
     d = await c.get_from_mapping(SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS)
     assert d['C_SunSpec_ID'] == 0x53756e53, 'C_SunSpec_ID != "SunS"'
+    d.pop('C_SunSpec_DID', None)
+    d.pop('C_SunSpec_Length', None)
     for key, value in d.items():
         print('{:16}  {}'.format(key, value))
     print()
 
     d2 = await c.get_from_mapping(SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS)
+    d2.pop('C_SunSpec_DID', None)
+    d2.pop('C_SunSpec_Length', None)
     for key, value in d2.items():
         print('{:16}  {}'.format(key, value))
     print()
+
+    d.update(d2)
+    return d
+
+
+async def mainloop(host, port):
+    publisher = Pe32SunspecPublisher()
+    async with publisher.open():
+        while True:
+            try:
+                data = await asyncio.wait_for(
+                    oneshot(host, port), timeout=5)
+                await asyncio.wait_for(publisher.publish(data), timeout=5)
+            except asyncio.TimeoutError:
+                print('timeout, alas..')
+            else:
+                await asyncio.sleep(60)
 
 
 if __name__ == '__main__':
