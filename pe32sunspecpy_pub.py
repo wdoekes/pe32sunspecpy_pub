@@ -499,6 +499,8 @@ async def oneshot(host, port):
         print('{:16}  {}'.format(key, value))
     print()
 
+    writer.close()  # synchronous
+
     d.update(d2)
     return d
 
