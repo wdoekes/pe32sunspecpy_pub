@@ -149,6 +149,23 @@ SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS = (
     # 40069: [101] = single phase, 102 = split phase, 103 = threephase
     (40069, 'C_SunSpec_DID', RType.U16),        # 101 (= single phase)
     (40070, 'C_SunSpec_Length', RType.U16),     # 50 + 40070 + 1 == 40121
+    #
+    (40071, 'I_AC_Current', RType.U16, 'A'),
+    (40075, 'I_AC_Current_SF', RType.I16),
+    (40087, 'I_AC_VA', RType.U16, 'VA'),
+    (40088, 'I_AC_VA_SF', RType.I16),
+    (40089, 'I_AC_VAR', RType.U16, 'VAR'),
+    (40090, 'I_AC_VAR_SF', RType.I16),
+    #
+    # v-- for the 1-phase Inverter, we read these
+    (40076, 'I_AC_VoltageAB', RType.U16, 'V'),
+    (40082, 'I_AC_VoltageAB_SF', RType.I16),
+    # v-- the others are at 6553.5 (=U16MAX)
+    # (40077, 'I_AC_VoltageBC', RType.U16, 'V'),
+    # (40082, 'I_AC_VoltageBC_SF', RType.I16),
+    # (40078, 'I_AC_VoltageCA', RType.U16, 'V'),
+    # (40082, 'I_AC_VoltageCA_SF', RType.I16),
+    #
     (40083, 'I_AC_Power', RType.U16, 'W'),      # AC Power value [Watt]
     (40084, 'I_AC_Power_SF', RType.I16),        # AC Power scale (exp)
     (40085, 'I_AC_Frequency', RType.U16, 'Hz'),  # AC Frequency value [Hertz]
@@ -450,6 +467,11 @@ class Pe32SunspecPublisher:
             f's_inst_power_w={int(kv["I_AC_Power"])}&'
             f's_temperature={float(kv["I_Temp_Sink"])}&'
             f's_status={kv["I_Status"]}:{kv["I_Status_Vendor"]}&'
+            f'p_freq={float(kv["I_AC_Frequency"])}&'
+            f'p_volt={float(kv["I_AC_VoltageAB"])}&'
+            f'dbg_s_current={float(kv["I_AC_Current"])}&'
+            f'dbg_s_va={float(kv["I_AC_VA"])}&'
+            f'dbg_s_var={float(kv["I_AC_VAR"])}&'
             f'dbg_uptime={tm}&'
             f'dbg_version={__version__}').encode('ascii')
 
