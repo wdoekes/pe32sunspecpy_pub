@@ -453,7 +453,7 @@ class Pe32SunspecPublisher:
         return self._mqttc
 
     async def publish(self, kv):
-        print(f'publish: {kv}')
+        # print(f'publish: {kv}')
 
         tm = int(time.time())
         s_identifier = (
@@ -485,19 +485,13 @@ async def oneshot(host, port):
     c = SunspecModbusTcpAsyncio(reader, writer)
 
     d = await c.get_from_mapping(SUNSPEC_COMMON_MODEL_REGISTER_MAPPINGS)
-    assert d['C_SunSpec_ID'] == 0x53756e53, 'C_SunSpec_ID != "SunS"'
+    assert d['C_SunSpec_ID'] == 0x53756e53, ('C_SunSpec_ID != "SunS"', d)
     d.pop('C_SunSpec_DID', None)
     d.pop('C_SunSpec_Length', None)
-    for key, value in d.items():
-        print('{:16}  {}'.format(key, value))
-    print()
 
     d2 = await c.get_from_mapping(SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS)
     d2.pop('C_SunSpec_DID', None)
     d2.pop('C_SunSpec_Length', None)
-    for key, value in d2.items():
-        print('{:16}  {}'.format(key, value))
-    print()
 
     writer.close()  # synchronous
 
@@ -519,7 +513,7 @@ async def mainloop(host, port):
                 await asyncio.sleep(60)
 
 
-if __name__ == '__main__':
+def main():
     # Test
     rs = Registers(b'\x41\x61\x70\x00')
     assert rs[0] == 0x4161, rs[0]
@@ -537,4 +531,10 @@ if __name__ == '__main__':
         asyncio.run(mainloop(host, port))
     else:
         host, port = sys.argv[1:]  # port defaults to 1502
-        asyncio.run(oneshot(host, port))
+        kv = asyncio.run(oneshot(host, port))
+        for key, value in kv.items():
+            print('{:16}  {}'.format(key, value))
+
+
+if __name__ == '__main__':
+    main()
