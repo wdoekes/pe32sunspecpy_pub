@@ -273,7 +273,12 @@ class RegisterIface:
 
         See: RType class.
         """
-        return type_(self._registers.packed, offset - self._off)
+        try:
+            return type_(self._registers.packed, offset - self._off)
+        except UnicodeDecodeError as e:
+            raise ValueError(
+                self._registers.packed(offset - self._off, type_.len)
+                ) from e
 
     def mapping2dict(self, mapping):
         """
