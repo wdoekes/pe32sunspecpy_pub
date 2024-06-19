@@ -172,7 +172,11 @@ SUNSPEC_INVERTER_MODEL_REGISTER_MAPPINGS = (
     (40086, 'I_AC_Frequency_SF', RType.I16),    # AC Frequency scale (exp)
     (40093, 'I_AC_Energy_WH', RType.U32, 'Wh'),  # AC Lifetime Energy prod [WH]
     (40095, 'I_AC_Energy_WH_SF', RType.I16),    # AC Lifetime Energe sc. (exp)
-    (40100, 'I_DC_Power', RType.U16, 'W'),      # DC Power value [Watt]
+    (40096, 'I_DC_Current', RType.U16, 'A'),    # DC Amps value [Ampere]
+    (40097, 'I_DC_Current_SF', RType.I16),      # DC Amps scale (exp)
+    (40098, 'I_DC_Voltage', RType.U16, 'V'),    # DC Voltage value [Volt]
+    (40099, 'I_DC_Voltage_SF', RType.I16),      # DC Voltage scale (exp)
+    (40100, 'I_DC_Power', RType.I16, 'W'),      # DC Power value [Watt]
     (40101, 'I_DC_Power_SF', RType.I16),        # DC Power scale (exp)
     (40103, 'I_Temp_Sink', RType.I16, '°C'),    # Heat Sink temp [C]
     (40106, 'I_Temp_Sink_SF', RType.I16),       # Heat Sink scale (exp)
